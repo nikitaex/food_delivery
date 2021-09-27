@@ -1,7 +1,10 @@
+from decimal import Decimal
+
 from django.core.mail import send_mail
 
 
 from conf import settings
+from delivery.models import Order, CartMeal, Restaurant, Meal, Complaint, Cart, Customer
 
 
 def send_order_to_restaurant(restaurant_email, meal):
@@ -25,3 +28,59 @@ def send_delivery_notification_to_customer(user_email, meal, order_id):
         [user_email],
 
     )
+
+
+def get_or_create_cart_meal(user, meal, cart):
+    CartMeal.objects.get_or_create(
+        user=user,
+        meal=meal,
+        cart=cart,
+    )
+
+
+def create_order(customer, first_name, last_name, phone, address, restaurant_address):
+    Order.objects.create(
+        customer=customer,
+        first_name=first_name,
+        last_name=last_name,
+        phone=phone,
+        address=address,
+        restaurant_address=restaurant_address,
+    ).save()
+
+
+def restaurant_create(owner, name, slug, address, email):
+    restaurant = Restaurant.objects.create(owner=owner,
+                                           name=name,
+                                           slug=slug,
+                                           address=address,
+                                           email=email,
+                                           )
+
+    restaurant.save()
+
+
+def meal_create(title, description, price, restaurant, slug, discount):
+    meal = Meal.objects.create(title=title,
+                               description=description,
+                               price=price,
+                               restaurant=restaurant,
+                               slug=slug,
+                               discount=discount,
+                               )
+    meal.save()
+
+
+def create_complaint(order, courier, customer, description):
+    Complaint.objects.create(
+        order=order,
+        courier=courier,
+        customer=customer,
+        description=description,
+    ).save()
+
+
+def get_cart(user):
+    if user.is_authenticated:
+        return Cart.objects.get(owner=user.customer, for_anonymous_user=False)
+    return Cart.objects.get(for_anonymous_user=True)

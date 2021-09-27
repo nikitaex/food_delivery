@@ -1,8 +1,15 @@
 import json
-from django.contrib.auth import get_user_model
+
+from django.conf import settings
+from django.contrib.auth.models import AbstractUser
 from django.db import models
 
-User = get_user_model()
+from delivery.models_service import calculate_discount
+
+
+class User(AbstractUser):
+    is_restaurateur = models.BooleanField(default=False)
+    is_courier = models.BooleanField(default=False)
 
 
 class Restaurant(models.Model):
@@ -11,7 +18,7 @@ class Restaurant(models.Model):
     name = models.CharField(max_length=255)
     slug = models.SlugField(unique=True)
     address = models.CharField(max_length=1024)
-    owner = models.ForeignKey('Restaurateur', on_delete=models.CASCADE, null=True)
+    owner = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
     meals = models.ManyToManyField('Meal', related_name='related_restaurant', blank=True)
     email = models.EmailField()
 
@@ -25,17 +32,6 @@ class Restaurant(models.Model):
     class Meta:
         verbose_name = 'Restaurant'
         verbose_name_plural = 'Restaurants'
-
-
-class Restaurateur(models.Model):
-    """Restaurateur"""
-
-    is_owner = models.BooleanField(default=False)
-    is_manager = models.BooleanField(default=False)
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='restaurateur')
-
-    def __str__(self):
-        return str(self.user)
 
 
 class Meal(models.Model):
@@ -69,9 +65,8 @@ class CartMeal(models.Model):
         return f"Meal {self.meal.title} from cart {self.user}"
 
     def save(self, *args, **kwargs):
-        if self.meal.discount < 1:
-            self.final_price = self.qty * self.meal.price
-        self.final_price = (self.qty * self.meal.price * (100-self.meal.discount))/100
+        final_price = calculate_discount(self.meal.discount, self.qty, self.meal.price)
+        self.final_price = final_price
         super().save(*args, **kwargs)
 
     class Meta:
@@ -82,7 +77,7 @@ class CartMeal(models.Model):
 class Cart(models.Model):
     """Cart"""
 
-    owner = models.ForeignKey('Customer', on_delete=models.CASCADE)
+    owner = models.OneToOneField('Customer', on_delete=models.CASCADE)
     meals = models.ManyToManyField(CartMeal, related_name='related_cart', blank=True)
     total_products = models.PositiveIntegerField(default=0)
     final_price = models.DecimalField(max_digits=9, decimal_places=2, default=0)
@@ -106,9 +101,9 @@ class Cart(models.Model):
 class Customer(models.Model):
     """Customer"""
 
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='customer')
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='customer')
     phone = models.CharField(max_length=20, blank=True)
-    home_address = models.CharField(max_length=1024, blank=True)
+    home_address = models.CharField(max_length=1024, blank=True, null=True)
     orders = models.ManyToManyField('Order', related_name='related_order', blank=True)
 
     def __str__(self):
@@ -146,7 +141,7 @@ class Order(models.Model):
     status = models.CharField(max_length=100, choices=STATUS_CHOICES, default=STATUS_NEW)
     created_at = models.DateTimeField(auto_now=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
-    courier = models.ForeignKey('Courier', on_delete=models.SET_NULL, null=True, blank=True)
+    courier = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
 
     def __str__(self):
         return f"Order {self.customer}'s user to {self.address}"
@@ -156,16 +151,9 @@ class Order(models.Model):
         verbose_name_plural = 'Orders'
 
 
-class Courier(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='courier')
-
-    def __str__(self):
-        return str(self.user)
-
-
 class Complaint(models.Model):
     order = models.OneToOneField(Order, on_delete=models.CASCADE)
-    courier = models.ForeignKey(Courier, on_delete=models.CASCADE)
+    courier = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
     description = models.TextField(default=f'Complaint on courier {str(courier)}')
 

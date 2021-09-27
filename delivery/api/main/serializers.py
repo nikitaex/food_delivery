@@ -7,7 +7,7 @@ class RestaurantSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Restaurant
-        fields = ['name', 'slug', 'address']
+        fields = ['name', 'slug', 'address', 'email']
         lookup_field = 'slug'
         extra_kwargs = {
             'url': {'lookup_field': 'slug'},
@@ -15,8 +15,6 @@ class RestaurantSerializer(serializers.ModelSerializer):
 
 
 class MealSerializer(serializers.ModelSerializer):
-
-    restaurant = RestaurantSerializer()
 
     class Meta:
         model = Meal

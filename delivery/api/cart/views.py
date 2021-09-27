@@ -1,28 +1,25 @@
 from rest_framework.decorators import action
-from rest_framework import response, status, viewsets
+from rest_framework.viewsets import ModelViewSet
+from rest_framework.response import Response
+from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_204_NO_CONTENT
 from django.shortcuts import get_object_or_404
 import itertools
 
 from delivery.tasks import send_order_to_restaurant
 from ..cart.serializers import CartSerializer
-from delivery.models import Cart, Meal, CartMeal, Customer, Order
+from delivery.models import Cart, Meal, CartMeal, Customer
+from ...service import create_order, get_or_create_cart_meal, get_cart
 
 
-class CartViewSet(viewsets.ModelViewSet):
+class CartViewSet(ModelViewSet):
 
     serializer_class = CartSerializer
     queryset = Cart.objects.all()
     """To get the current user's shopping cart, go to /current_customer_cart"""
 
     @staticmethod
-    def get_cart(user):
-        if user.is_authenticated:
-            return Cart.objects.get(owner=user.customer, for_anonymous_user=False)
-        return Cart.objects.get(for_anonymous_user=True)
-
-    @staticmethod
     def _get_or_create_cart_meal(customer: Customer, cart: Cart, meal: Meal):
-        cart_meal, created = CartMeal.objects.get_or_create(
+        cart_meal, created = get_or_create_cart_meal(
             user=customer,
             meal=meal,
             cart=cart,
@@ -31,22 +28,22 @@ class CartViewSet(viewsets.ModelViewSet):
 
     @action(methods=['GET'], detail=False)
     def current_customer_cart(self, *args, **kwargs):
-        cart = self.get_cart(self.request.user)
+        cart = get_cart(self.request.user)
         cart_serializer = CartSerializer(cart)
-        return response.Response(cart_serializer.data)
+        return Response(cart_serializer.data)
 
     @action(methods=['PUT'], detail=False, url_path=r'current_customer_cart/add_to_cart/(?P<meal_id>\d+)')
     def meal_add_to_cart(self, *args, **kwargs):
-        cart = self.get_cart(self.request.user)
+        cart = get_cart(self.request.user)
         meal = get_object_or_404(Meal, id=kwargs['meal_id'])
         cart_meal, created = self._get_or_create_cart_meal(self.request.user.customer, cart, meal)
         if created:
             cart.meals.add(cart_meal)
             cart.save()
-            return response.Response({"detail": "Meal added to cart", "added": True})
-        return response.Response({"detail": "Meal has been added to cart", "added": False},
-                                 status=status.HTTP_400_BAD_REQUEST,
-                                 )
+            return Response({"detail": "Meal added to cart", "added": True})
+        return Response({"detail": "Meal has been added to cart", "added": False},
+                        status=HTTP_400_BAD_REQUEST,
+                        )
 
     @action(methods=['PATCH'],
             detail=False,
@@ -57,16 +54,16 @@ class CartViewSet(viewsets.ModelViewSet):
         cart_meal.qty = int(kwargs['qty'])
         cart_meal.save()
         cart_meal.cart.save()
-        return response.Response(status=status.HTTP_200_OK)
+        return Response(status=HTTP_200_OK)
 
     @action(methods=['PUT'], detail=False, url_path=r'current_customer_cart/remove_from_cart/(?P<cart_meal_id>\d+)')
     def meal_remove_from_cart(self, *args, **kwargs):
-        cart = self.get_cart(self.request.user)
+        cart = get_cart(self.request.user)
         cart_meal = get_object_or_404(CartMeal, id=kwargs['cart_meal_id'])
         cart.meals.remove(cart_meal)
         cart_meal.delete()
         cart.save()
-        return response.Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(status=HTTP_204_NO_CONTENT)
 
     @action(methods=['PUT'], detail=False, url_path='current_customer_cart/add_to_order')
     def add_cart_to_order(self, *args, **kwargs):
@@ -76,7 +73,7 @@ class CartViewSet(viewsets.ModelViewSet):
 
         for restaurant, cart_meals in itertools.groupby(CartMeal.objects.filter(cart=cart).order_by('meal__restaurant'),
                                                         lambda s: s.meal.restaurant):
-            order = Order.objects.create(
+            order = create_order(
                 customer=self.request.user.customer,
                 first_name=data['first_name'],
                 last_name=data['last_name'],
@@ -94,4 +91,4 @@ class CartViewSet(viewsets.ModelViewSet):
             for meal in meals:
                 send_order_to_restaurant.delay(meal.restaurant.email, meal.title)
 
-        return response.Response({"detail": "Order is created", "added": True})
+        return Response({"detail": "Order is created", "added": True})

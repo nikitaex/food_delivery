@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from delivery.models import Cart, Customer, CartMeal, Order, Complaint
-from delivery_api.main.serializers import MealSerializer
+from delivery.api.main.serializers import MealSerializer
 
 
 class CartMealSerializer(serializers.ModelSerializer):
