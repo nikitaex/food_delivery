@@ -1,8 +1,10 @@
 import json
+from decimal import Decimal
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Sum, F, DecimalField, IntegerField
 
 from delivery.models_service import calculate_discount
 
@@ -59,7 +61,7 @@ class CartMeal(models.Model):
     cart = models.ForeignKey('Cart', verbose_name='Cart', on_delete=models.CASCADE, related_name='related_meals')
     meal = models.ForeignKey(Meal, verbose_name='Meal', on_delete=models.CASCADE)
     qty = models.IntegerField(default=1)
-    final_price = models.DecimalField(max_digits=9, decimal_places=2)
+    final_price = models.DecimalField(max_digits=9, decimal_places=2, default=0)
 
     def __str__(self):
         return f"Meal {self.meal.title} from cart {self.user}"
@@ -90,7 +92,10 @@ class Cart(models.Model):
     def save(self, *args, **kwargs):
         if self.id:
             self.total_products = self.meals.count()
-            self.final_price = sum([cmeals.final_price for cmeals in self.meals.all()])
+            self.final_price = Cart.objects.aggregate(final_price=Sum(
+                F('meals__final_price'),
+                output_field=DecimalField())
+            )['final_price']
         super().save(*args, **kwargs)
 
     class Meta:

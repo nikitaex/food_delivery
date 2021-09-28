@@ -27,55 +27,23 @@ class RestaurantViewSet(ModelViewSet):
         return queryset
 
     def get_permissions(self):
-        method = self.request.method
-        if method == 'POST' or method == 'PATCH':
+
+        if self.action == 'create' or self.action == 'restaurant_orders':
             return [RestaurateurOnly()]
         else:
             return [AllowAny()]
 
-    @action(['POST'], detail=False, url_path='create_restaurant')
-    @permission_classes([RestaurateurOnly])
-    def create_restaurant(self, *args, **kwargs):
-        restaurant_data = self.request.data
-        serializer = self.get_serializer(restaurant_data)
-
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         restaurant_create(owner=self.request.user,
                           name=serializer["name"].value,
                           slug=serializer["slug"].value,
                           address=serializer["address"].value,
                           email=serializer["email"].value,
                           )
-
-        return Response(status=HTTP_201_CREATED)
-
-    @action(['GET'], detail=False, url_path='orders')
-    def restaurant_orders(self, *args, **kwargs):
-        restaurant = Restaurant.objects.get(owner=self.request.user)
-        order = Order.objects.filter(cart_meal__meal__restaurant=restaurant)
-
-        serializer = OrderSerializer(order, many=True)
-
-        return Response(serializer.data)
-
-    @action(methods=['PATCH'],
-            detail=False,
-            url_path=r'orders/accepted_for_cooking/(?P<order_id>\d+)',
-            )
-    def order_change_status_on_accepdet(self, *args, **kwargs):
-        order = get_object_or_404(Order, id=kwargs['order_id'])
-        order.status = order.STATUS_ACCEPTED
-        order.save()
-        return Response(status=HTTP_200_OK)
-
-    @action(methods=['PATCH'],
-            detail=False,
-            url_path=r'orders/cooked/(?P<order_id>\d+)',
-            )
-    def order_change_status_on_cooked(self, *args, **kwargs):
-        order = get_object_or_404(Order, id=kwargs['order_id'])
-        order.status = order.STATUS_COOKED
-        order.save()
-        return Response(status=HTTP_200_OK)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=HTTP_201_CREATED, headers=headers)
 
     @action(['GET'], detail=False, url_path='orders')
     def restaurant_orders(self, *args, **kwargs):
@@ -85,26 +53,6 @@ class RestaurantViewSet(ModelViewSet):
         serializer = OrderSerializer(order, many=True)
 
         return Response(serializer.data)
-
-    @action(methods=['PATCH'],
-            detail=False,
-            url_path=r'orders/accepted_for_cooking/(?P<order_id>\d+)',
-            )
-    def order_change_status_on_accepted(self, *args, **kwargs):
-        order = get_object_or_404(Order, id=kwargs['order_id'])
-        order.status = order.STATUS_ACCEPTED
-        order.save()
-        return Response(status=HTTP_200_OK)
-
-    @action(methods=['PATCH'],
-            detail=False,
-            url_path=r'orders/cooked/(?P<order_id>\d+)',
-            )
-    def order_change_status_on_cooked(self, *args, **kwargs):
-        order = get_object_or_404(Order, id=kwargs['order_id'])
-        order.status = order.STATUS_COOKED
-        order.save()
-        return Response(status=HTTP_200_OK)
 
 
 class MealViewSet(ModelViewSet):
@@ -113,23 +61,20 @@ class MealViewSet(ModelViewSet):
 
     def get_queryset(self):
         if self.request.user.is_restaurateur:
-            queryset = Meal.objects.filter(restaurant=Restaurant.objects.filter(owner=self.request.user))
+            queryset = Meal.objects.filter(restaurant=Restaurant.objects.get(owner=self.request.user))
             return queryset
         return Meal.objects.all()
 
     def get_permissions(self):
-        method = self.request.method
-        if method == 'POST' or method == 'PUT' or method == 'PATCH':
+        if self.action == 'create' or self.action == 'destroy' or self.action == 'change_meal':
             return [RestaurateurOnly()]
         else:
             return [AllowAny()]
 
-    @action(['POST'], detail=False, url_path='create_meal')
-    def create_meal(self, *args, **kwargs):
-        meal_data = self.request.data
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         restaurant = Restaurant.objects.get(owner=self.request.user)
-        serializer = MealSerializer(meal_data)
-
         meal_create(title=serializer["title"].value,
                     description=serializer["description"].value,
                     price=serializer["price"].value,
@@ -137,21 +82,20 @@ class MealViewSet(ModelViewSet):
                     slug=serializer["slug"].value,
                     discount=serializer["discount"].value,
                     )
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=HTTP_201_CREATED, headers=headers)
 
-        return Response(status=HTTP_201_CREATED)
-
-    @action(['PUT'], detail=False, url_path=r'remove_meal/(?P<meal_slug>\w+)')
-    def remove_meal(self, *args, **kwargs):
-        meal = get_object_or_404(Meal, slug=kwargs['meal_slug'])
-        meal.delete()
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self.perform_destroy(instance)
         return Response(status=HTTP_204_NO_CONTENT)
 
     @action(['PUT'], detail=False, url_path=r'change_meal/(?P<meal_slug>\w+)')
     def change_meal(self, *args, **kwargs):
         meal = get_object_or_404(Meal, slug=kwargs['meal_slug'])
         data = self.request.data
-
         restaurant = Restaurant.objects.get(owner=self.request.user)
+
         meal.restaurant = restaurant
         meal.title = data.get('title', meal.title)
         meal.description = data.get('description', meal.description)
@@ -166,8 +110,20 @@ class MealViewSet(ModelViewSet):
 
 class OrderViewSet(ModelViewSet):
     serializer_class = OrderSerializer
-    queryset = Order.objects.filter(status='cooked')
-    permission_classes = (CourierOnly,)
+
+    def get_queryset(self):
+        if self.request.user.is_restaurateur:
+            queryset = Order.objects.filter(cart_meal__meal__restaurant=Restaurant.objects.get(owner=self.request.user))
+            return queryset
+        elif self.request.user.is_courier:
+            queryset = Order.objects.filter(status='cooked')
+            return queryset
+
+    def get_permissions(self):
+        if self.action == 'order_change_status_on_accepted' or self.action == 'order_change_status_on_cooked':
+            return [RestaurateurOnly()]
+        else:
+            return [CourierOnly()]
 
     @action(methods=['GET'], detail=False, url_path='current_courier_orders')
     def get_current_courier_orders(self, *args, **kwargs):
@@ -199,6 +155,26 @@ class OrderViewSet(ModelViewSet):
 
         send_delivery_notification_to_customer.delay(order.customer.user.email, " ".join(meals_list), order_id=order.id)
 
+        return Response(status=HTTP_200_OK)
+
+    @action(methods=['PATCH'],
+            detail=False,
+            url_path=r'orders/accepted_for_cooking/(?P<order_id>\d+)',
+            )
+    def order_change_status_on_accepted(self, *args, **kwargs):
+        order = get_object_or_404(Order, id=kwargs['order_id'])
+        order.status = order.STATUS_ACCEPTED
+        order.save()
+        return Response(status=HTTP_200_OK)
+
+    @action(methods=['PATCH'],
+            detail=False,
+            url_path=r'orders/cooked/(?P<order_id>\d+)',
+            )
+    def order_change_status_on_cooked(self, *args, **kwargs):
+        order = get_object_or_404(Order, id=kwargs['order_id'])
+        order.status = order.STATUS_COOKED
+        order.save()
         return Response(status=HTTP_200_OK)
 
 

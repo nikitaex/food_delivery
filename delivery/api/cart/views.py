@@ -19,11 +19,11 @@ class CartViewSet(ModelViewSet):
 
     @staticmethod
     def _get_or_create_cart_meal(customer: Customer, cart: Cart, meal: Meal):
-        cart_meal, created = get_or_create_cart_meal(
+        cart_meal, created = CartMeal.objects.get_or_create(
             user=customer,
             meal=meal,
             cart=cart,
-        )
+            )
         return cart_meal, created
 
     @action(methods=['GET'], detail=False)
@@ -36,7 +36,7 @@ class CartViewSet(ModelViewSet):
     def meal_add_to_cart(self, *args, **kwargs):
         cart = get_cart(self.request.user)
         meal = get_object_or_404(Meal, id=kwargs['meal_id'])
-        cart_meal, created = self._get_or_create_cart_meal(self.request.user.customer, cart, meal)
+        cart_meal, created = self._get_or_create_cart_meal(customer=self.request.user.customer, cart=cart, meal=meal)
         if created:
             cart.meals.add(cart_meal)
             cart.save()
@@ -74,12 +74,12 @@ class CartViewSet(ModelViewSet):
         for restaurant, cart_meals in itertools.groupby(CartMeal.objects.filter(cart=cart).order_by('meal__restaurant'),
                                                         lambda s: s.meal.restaurant):
             order = create_order(
-                customer=self.request.user.customer,
-                first_name=data['first_name'],
-                last_name=data['last_name'],
-                phone=data['phone'],
-                address=data.get('address', self.request.user.customer.home_address),
-                restaurant_address=restaurant.address,
+                self.request.user.customer,
+                data['first_name'],
+                data['last_name'],
+                data['phone'],
+                data.get('address', self.request.user.customer.home_address),
+                restaurant.address,
             )
 
             order.cart_meal.set([cart_meal for cart_meal in cart_meals])
